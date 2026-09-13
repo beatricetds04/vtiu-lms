@@ -26,15 +26,6 @@
           {{ form.course_id(class="form-select") }}
         </div>
 
-        <div class="mb-3">
-          {{ form.meeting_code.label(class="form-label fw-bold") }}
-          {{ form.meeting_code(class="form-control", maxlength="80", autocomplete="off", placeholder="e.g. H2JD6L") }}
-          <div class="form-text">Enter a unique letters-and-numbers code for students to use.</div>
-          {% for error in form.meeting_code.errors %}
-            <div class="text-danger small">{{ error }}</div>
-          {% endfor %}
-        </div>
-
         <div class="row">
           <div class="col-md-6 mb-3">
             {{ form.scheduled_start.label(class="form-label fw-bold") }}
