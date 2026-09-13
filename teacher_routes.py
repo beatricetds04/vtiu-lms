@@ -17,8 +17,6 @@ from collections import defaultdict
 from utils.notifications import create_assignment_notification
 from utils.notification_engine import notify_quiz_created, notify_assignment_created, notify_assignment_graded
 import os, uuid
-import secrets
-import string
 from utils.helpers import get_programme_choices, get_level_choices, get_course_choices
 from utils.academic_year import configured_academic_year
 from wtforms.validators import DataRequired 
@@ -2108,26 +2106,6 @@ def meetings():
     return render_template('teacher/meetings_list.html', meetings=meetings)
 
 
-# -------------------------
-# Add new meeting
-# -------------------------
-# -------------------------
-# Agora meeting helpers
-# -------------------------
-import requests
-from flask import current_app
-from requests.auth import HTTPBasicAuth
-
-
-def create_agora_channel():
-    """Create a unique six-character random alphanumeric room code."""
-    alphabet = string.ascii_uppercase + string.digits
-    while True:
-        room_code = ''.join(secrets.choice(alphabet) for _ in range(6))
-        if 'VTIU' not in room_code and not Meeting.query.filter_by(meeting_code=room_code).first():
-            return room_code
-
-
 # Legacy Zoom API helpers are intentionally disabled. Restore from git history
 # only if a future rollback is required.
 # def get_zoom_access_token():
@@ -2152,12 +2130,20 @@ def add_meeting():
 
     if form.validate_on_submit():
         try:
+            meeting_code = form.meeting_code.data.strip().upper()
+            if not re.fullmatch(r'[A-Z0-9]{4,80}', meeting_code):
+                form.meeting_code.errors.append('Room code must contain only letters and numbers.')
+                return render_template('teacher/meeting_form.html', form=form)
+            if Meeting.query.filter_by(meeting_code=meeting_code).first():
+                form.meeting_code.errors.append('That room code is already in use. Please choose another.')
+                return render_template('teacher/meeting_form.html', form=form)
+
             meeting = Meeting(
                 title=form.title.data,
                 description=form.description.data,
                 host_id=current_user.id,
                 course_id=form.course_id.data,
-                meeting_code=create_agora_channel(),
+                meeting_code=meeting_code,
                 scheduled_start=form.scheduled_start.data,
                 scheduled_end=form.scheduled_end.data,
             )
@@ -2196,14 +2182,24 @@ def edit_meeting(meeting_id):
         if form.scheduled_end.data <= form.scheduled_start.data:
             form.scheduled_end.errors.append('End time must be after the start time.')
         else:
-            meeting.title = form.title.data
-            meeting.description = form.description.data
-            meeting.course_id = form.course_id.data
-            meeting.scheduled_start = form.scheduled_start.data
-            meeting.scheduled_end = form.scheduled_end.data
-            db.session.commit()
-            flash('Meeting updated successfully.', 'success')
-            return redirect(url_for('teacher.meetings'))
+            meeting_code = form.meeting_code.data.strip().upper()
+            if not re.fullmatch(r'[A-Z0-9]{4,80}', meeting_code):
+                form.meeting_code.errors.append('Room code must contain only letters and numbers.')
+            elif Meeting.query.filter(
+                Meeting.meeting_code == meeting_code,
+                Meeting.id != meeting.id,
+            ).first():
+                form.meeting_code.errors.append('That room code is already in use. Please choose another.')
+            else:
+                meeting.title = form.title.data
+                meeting.description = form.description.data
+                meeting.course_id = form.course_id.data
+                meeting.meeting_code = meeting_code
+                meeting.scheduled_start = form.scheduled_start.data
+                meeting.scheduled_end = form.scheduled_end.data
+                db.session.commit()
+                flash('Meeting updated successfully.', 'success')
+                return redirect(url_for('teacher.meetings'))
 
     return render_template('teacher/meeting_form.html', form=form, meeting=meeting)
 
