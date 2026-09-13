@@ -2118,8 +2118,14 @@ from requests.auth import HTTPBasicAuth
 
 
 def create_agora_channel():
-    """Create an unpredictable channel name owned by this LMS meeting."""
-    return f"vtiu-{uuid.uuid4().hex}"
+    """Create a unique 8-character random alphanumeric Room ID (Readable set)."""
+    import secrets
+    # Use a character set that avoids ambiguous characters (O, 0, I, 1)
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    while True:
+        room_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        if not Meeting.query.filter_by(meeting_code=room_code).first():
+            return room_code
 
 
 # Legacy Zoom API helpers are intentionally disabled. Restore from git history
