@@ -520,7 +520,6 @@ class MeetingForm(FlaskForm):
     title = StringField('Meeting Title', validators=[DataRequired()])
     description = TextAreaField('Description')
     course_id = SelectField('Course', coerce=int, validators=[DataRequired()])
-    meeting_code = StringField('Room Code', validators=[DataRequired(), Length(min=4, max=80)])
     scheduled_start = DateTimeLocalField('Start Date & Time', format='%Y-%m-%dT%H:%M', validators=[DataRequired()])
     scheduled_end = DateTimeLocalField('End Date & Time', format='%Y-%m-%dT%H:%M', validators=[DataRequired()])
     submit = SubmitField('Save Meeting')
