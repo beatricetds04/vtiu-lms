@@ -17,6 +17,8 @@ from collections import defaultdict
 from utils.notifications import create_assignment_notification
 from utils.notification_engine import notify_quiz_created, notify_assignment_created, notify_assignment_graded
 import os, uuid
+import secrets
+import string
 from utils.helpers import get_programme_choices, get_level_choices, get_course_choices
 from utils.academic_year import configured_academic_year
 from wtforms.validators import DataRequired 
@@ -2118,13 +2120,11 @@ from requests.auth import HTTPBasicAuth
 
 
 def create_agora_channel():
-    """Create a unique 8-character random alphanumeric Room ID (Readable set)."""
-    import secrets
-    # Use a character set that avoids ambiguous characters (O, 0, I, 1)
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    """Create a unique six-character random alphanumeric room code."""
+    alphabet = string.ascii_uppercase + string.digits
     while True:
-        room_code = ''.join(secrets.choice(alphabet) for _ in range(8))
-        if not Meeting.query.filter_by(meeting_code=room_code).first():
+        room_code = ''.join(secrets.choice(alphabet) for _ in range(6))
+        if 'VTIU' not in room_code and not Meeting.query.filter_by(meeting_code=room_code).first():
             return room_code
 
 
