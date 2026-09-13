@@ -2130,20 +2130,12 @@ def add_meeting():
 
     if form.validate_on_submit():
         try:
-            meeting_code = form.meeting_code.data.strip().upper()
-            if not re.fullmatch(r'[A-Z0-9]{4,80}', meeting_code):
-                form.meeting_code.errors.append('Room code must contain only letters and numbers.')
-                return render_template('teacher/meeting_form.html', form=form)
-            if Meeting.query.filter_by(meeting_code=meeting_code).first():
-                form.meeting_code.errors.append('That room code is already in use. Please choose another.')
-                return render_template('teacher/meeting_form.html', form=form)
-
             meeting = Meeting(
                 title=form.title.data,
                 description=form.description.data,
                 host_id=current_user.id,
                 course_id=form.course_id.data,
-                meeting_code=meeting_code,
+                meeting_code=f'meeting-{uuid.uuid4().hex}',
                 scheduled_start=form.scheduled_start.data,
                 scheduled_end=form.scheduled_end.data,
             )
@@ -2182,24 +2174,14 @@ def edit_meeting(meeting_id):
         if form.scheduled_end.data <= form.scheduled_start.data:
             form.scheduled_end.errors.append('End time must be after the start time.')
         else:
-            meeting_code = form.meeting_code.data.strip().upper()
-            if not re.fullmatch(r'[A-Z0-9]{4,80}', meeting_code):
-                form.meeting_code.errors.append('Room code must contain only letters and numbers.')
-            elif Meeting.query.filter(
-                Meeting.meeting_code == meeting_code,
-                Meeting.id != meeting.id,
-            ).first():
-                form.meeting_code.errors.append('That room code is already in use. Please choose another.')
-            else:
-                meeting.title = form.title.data
-                meeting.description = form.description.data
-                meeting.course_id = form.course_id.data
-                meeting.meeting_code = meeting_code
-                meeting.scheduled_start = form.scheduled_start.data
-                meeting.scheduled_end = form.scheduled_end.data
-                db.session.commit()
-                flash('Meeting updated successfully.', 'success')
-                return redirect(url_for('teacher.meetings'))
+            meeting.title = form.title.data
+            meeting.description = form.description.data
+            meeting.course_id = form.course_id.data
+            meeting.scheduled_start = form.scheduled_start.data
+            meeting.scheduled_end = form.scheduled_end.data
+            db.session.commit()
+            flash('Meeting updated successfully.', 'success')
+            return redirect(url_for('teacher.meetings'))
 
     return render_template('teacher/meeting_form.html', form=form, meeting=meeting)
 
