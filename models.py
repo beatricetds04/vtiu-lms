@@ -562,7 +562,15 @@ class Admin(db.Model, UserMixin):
 
         return self.role == 'admissions_admin'
 
-    
+    @property
+    def is_student(self) -> bool:
+        """Admins are never students."""
+        return False
+
+    @property
+    def is_teacher(self) -> bool:
+        """Admins are never teachers."""
+        return False
 
     @property
 
@@ -1408,7 +1416,30 @@ class User(db.Model, UserMixin):   # <-- add UserMixin here
 
         return self.role == 'teacher'
 
+    @property
+    def is_admin(self):
+        """Regular users are never admins."""
+        return False
 
+    @property
+    def is_superadmin(self):
+        """Regular users are never superadmins."""
+        return False
+
+    @property
+    def is_finance_admin(self):
+        """Regular users are never finance admins."""
+        return False
+
+    @property
+    def is_academic_admin(self):
+        """Regular users are never academic admins."""
+        return False
+
+    @property
+    def is_admissions_admin(self):
+        """Regular users are never admissions admins."""
+        return False
 
     # NAME PROPERTIES
 
@@ -3912,4 +3943,33 @@ class StudentPromotion(db.Model):
 
         }
 
-    
+
+class MobileAuthToken(db.Model):
+    __tablename__ = 'mobile_auth_token'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(128), unique=True, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+
+    user = db.relationship('User')
+
+    @classmethod
+    def generate(cls, user_obj):
+        import secrets
+        token = secrets.token_urlsafe(64)
+        expires_at = datetime.utcnow() + timedelta(minutes=5)
+        new_token = cls(token=token, user_id=user_obj.id, expires_at=expires_at)
+        db.session.add(new_token)
+        db.session.commit()
+        return token
+
+    @classmethod
+    def verify_and_consume(cls, token_str):
+        auth_token = cls.query.filter_by(token=token_str).first()
+        if auth_token and auth_token.expires_at > datetime.utcnow():
+            user = auth_token.user
+            db.session.delete(auth_token)
+            db.session.commit()
+            return user
+        return None
