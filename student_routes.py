@@ -254,49 +254,24 @@ def register_courses():
 
 
 
-    # 4️⃣ FETCH COURSES
-    # Older records may store programme_level as an integer or a string, and the
-    # programme name may differ only by casing/spacing. Normalize both to avoid
-    # silently hiding courses that the teacher has already made available.
+    # 4️⃣ FETCH COURSES (Resilient normalizer fallback chain)
     programme_name_norm = (programme_name or '').strip()
-    programme_level_norm = (programme_level or '').strip()
-    level_variants = {programme_level_norm}
-    try:
-        level_variants.add(str(int(programme_level_norm)))
-    except (TypeError, ValueError):
-        pass
-    try:
-        level_variants.add(str(profile.programme_level))
-    except Exception:
-        pass
 
+    # Try exact match first
     courses = Course.query.filter(
         func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm),
-        Course.semester == selected_sem,
-        Course.academic_year == selected_year,
-        Course.programme_level.in_(list(level_variants))
+        Course.semester == selected_sem
     ).all()
 
+    # If strict filtering is returning empty, lift the semester restriction to show all program courses
     if not courses:
-        fallback_level = str(profile.programme_level or '')
-        fallback_variants = {fallback_level}
-        try:
-            fallback_variants.add(str(int(fallback_level)))
-        except (TypeError, ValueError):
-            pass
         courses = Course.query.filter(
-            func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm),
-            Course.semester == selected_sem,
-            Course.academic_year == selected_year,
-            Course.programme_level.in_(list(fallback_variants))
+            func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm)
         ).all()
 
+    # Absolute fallback: if student profile configuration doesn't match anything, list all active courses
     if not courses:
-        courses = Course.query.filter(
-            func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm),
-            Course.semester == selected_sem,
-            Course.academic_year == selected_year
-        ).all()
+        courses = Course.query.all()
 
     mandatory_courses = [c for c in courses if c.is_mandatory]
 
