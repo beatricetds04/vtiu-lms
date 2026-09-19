@@ -21,6 +21,7 @@ from flask_login import LoginManager, login_required, logout_user, current_user
 from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
 from flask_sock import Sock
+from sqlalchemy import text
 from utils.extensions import db, mail, socketio
 from config import Config
 from utils.academic_year import configured_academic_year
@@ -56,6 +57,20 @@ else:
     app.logger.info('SocketIO Redis message queue disabled; using local process events')
 socketio.init_app(app, **socketio_options)
 csrf = CSRFProtect(app)
+
+
+@app.route('/health', methods=['GET'])
+@app.route('/healthz', methods=['GET'])
+def health_check():
+    """Return the service health without requiring authentication."""
+    try:
+        db.session.execute(text('SELECT 1'))
+        db.session.remove()
+        return jsonify({'status': 'ok'}), 200
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Health check database probe failed')
+        return jsonify({'status': 'error'}), 503
 
 
 @app.route('/api/paystack/webhook', methods=['POST'])
@@ -435,6 +450,44 @@ def initialize_database():
                     "ALTER TABLE notification "
                     "ADD COLUMN is_archived BOOLEAN DEFAULT FALSE"
                 ))
+
+        # Repair older PostgreSQL databases that were created before the
+        # semester result release metadata fields were added.
+        release_table_name = "semester_result_release"
+        release_columns = {
+            column["name"]
+            for column in inspector.get_columns(release_table_name)
+        } if release_table_name in inspector.get_table_names() else set()
+        if release_table_name not in inspector.get_table_names():
+            logger.info("🔧 Creating missing semester_result_release table...")
+            SemesterResultRelease.__table__.create(db.engine, checkfirst=True)
+            release_columns = {
+                column["name"]
+                for column in inspector.get_columns(release_table_name)
+            }
+        with db.engine.begin() as connection:
+            for column_name, column_type in {
+                "academic_year": "VARCHAR(20)",
+                "semester": "VARCHAR(10)",
+                "is_released": "BOOLEAN DEFAULT FALSE",
+                "is_locked": "BOOLEAN DEFAULT FALSE",
+                "released_at": "TIMESTAMP",
+                "locked_at": "TIMESTAMP",
+                "submitted_by": "INTEGER",
+                "submitted_by_name": "VARCHAR(200)",
+                "submitted_at": "TIMESTAMP",
+                "submitted_note": "TEXT",
+                "submitted_courses": "TEXT",
+                "created_at": "TIMESTAMP",
+                "updated_at": "TIMESTAMP",
+            }.items():
+                if column_name not in release_columns:
+                    logger.info(f"🔧 Adding missing semester_result_release.{column_name} column...")
+                    connection.execute(text(
+                        f"ALTER TABLE {release_table_name} "
+                        f"ADD COLUMN {column_name} {column_type}"
+                    ))
+                    release_columns.add(column_name)
 
         grade_column_definitions = {
             "quiz_total_score": "FLOAT",
