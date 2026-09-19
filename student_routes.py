@@ -1,5 +1,6 @@
 import re
 
+
 from flask import Blueprint, current_app, render_template, abort, redirect, url_for, flash, jsonify, session, send_from_directory, send_file, make_response
 
 import json, os, secrets, requests
@@ -8,7 +9,7 @@ from flask import request
 
 from flask_login import login_required, current_user, login_user
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from werkzeug.utils import safe_join, secure_filename
 
@@ -213,11 +214,8 @@ def register_courses():
 
 
 
-    programme_name = profile.current_programme
-
-    programme_level = str(profile.programme_level)  # Convert integer to string for database compatibility
-
-
+    programme_name = (profile.current_programme or '').strip()
+    programme_level = str(profile.programme_level).strip() if profile.programme_level is not None else ''
 
     if not programme_name or not programme_level:
 
@@ -257,20 +255,48 @@ def register_courses():
 
 
     # 4️⃣ FETCH COURSES
+    # Older records may store programme_level as an integer or a string, and the
+    # programme name may differ only by casing/spacing. Normalize both to avoid
+    # silently hiding courses that the teacher has already made available.
+    programme_name_norm = (programme_name or '').strip()
+    programme_level_norm = (programme_level or '').strip()
+    level_variants = {programme_level_norm}
+    try:
+        level_variants.add(str(int(programme_level_norm)))
+    except (TypeError, ValueError):
+        pass
+    try:
+        level_variants.add(str(profile.programme_level))
+    except Exception:
+        pass
 
-    courses = Course.query.filter_by(
-
-        programme_name=programme_name,
-
-        programme_level=programme_level,
-
-        semester=selected_sem,
-
-        academic_year=selected_year
-
+    courses = Course.query.filter(
+        func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm),
+        Course.semester == selected_sem,
+        Course.academic_year == selected_year,
+        Course.programme_level.in_(list(level_variants))
     ).all()
 
+    if not courses:
+        fallback_level = str(profile.programme_level or '')
+        fallback_variants = {fallback_level}
+        try:
+            fallback_variants.add(str(int(fallback_level)))
+        except (TypeError, ValueError):
+            pass
+        courses = Course.query.filter(
+            func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm),
+            Course.semester == selected_sem,
+            Course.academic_year == selected_year,
+            Course.programme_level.in_(list(fallback_variants))
+        ).all()
 
+    if not courses:
+        courses = Course.query.filter(
+            func.lower(func.trim(Course.programme_name)) == func.lower(programme_name_norm),
+            Course.semester == selected_sem,
+            Course.academic_year == selected_year
+        ).all()
 
     mandatory_courses = [c for c in courses if c.is_mandatory]
 
@@ -1648,9 +1674,7 @@ def student_fees():
 
 
     fees = StudentFeeBalance.query.filter_by(
-
-        student_id=current_user.id
-
+        student_id=current_user.user_id
     ).order_by(StudentFeeBalance.id.desc()).all()
 
 
@@ -3140,6 +3164,5 @@ def teacher_assessment():
         level=profile.programme_level
 
     )
-
 
 
