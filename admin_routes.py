@@ -99,6 +99,10 @@ def check_admin_access():
         abort(403)
 
 
+def current_user_is_admin():
+    """Return True only for real Admin accounts; avoids AttributeError on regular User objects."""
+    return isinstance(current_user, Admin) and bool(getattr(current_user, 'is_admin', False))
+
 
 
 
@@ -7420,7 +7424,7 @@ def create_fee_notification(fee_group, sender=None):
 
 def assign_fees():
 
-    if not current_user.is_admin:
+    if not current_user_is_admin():
 
         flash("Unauthorized", "danger")
 
@@ -7904,7 +7908,7 @@ def bulk_assign_fees(programme_name, level, study_format, fee_structure_id):
 @admin_bp.route('/edit-fee-group/<int:group_id>', methods=['GET', 'POST'])
 @login_required
 def edit_fee_group(group_id):
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         flash("Unauthorized", "danger")
         return redirect(url_for('main.index'))
     group = ProgrammeFeeStructure.query.get_or_404(group_id)
@@ -8419,7 +8423,7 @@ def reset_user_password(request_id):
 @admin_bp.route('/teacher-assessment')
 @login_required
 def teacher_assessment_admin_home():
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     active_period = TeacherAssessmentPeriod.query.filter_by(is_active=True).first()
@@ -8433,7 +8437,7 @@ def teacher_assessment_admin_home():
 @admin_bp.route('/teacher-assessment/questions')
 @login_required
 def teacher_assessment_questions():
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     questions = TeacherAssessmentQuestion.query.order_by(
@@ -8449,7 +8453,7 @@ def teacher_assessment_questions():
 @admin_bp.route('/teacher-assessment/questions/add', methods=['GET', 'POST'])
 @login_required
 def add_teacher_assessment_question():
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     if request.method == 'POST':
@@ -8476,7 +8480,7 @@ def add_teacher_assessment_question():
 @admin_bp.route('/teacher-assessment/questions/<int:qid>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_teacher_assessment_question(qid):
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     q = TeacherAssessmentQuestion.query.get_or_404(qid)
@@ -8499,7 +8503,7 @@ def edit_teacher_assessment_question(qid):
 @admin_bp.route('/teacher-assessment/questions/<int:qid>/delete', methods=['POST'])
 @login_required
 def delete_teacher_assessment_question(qid):
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     q = TeacherAssessmentQuestion.query.get_or_404(qid)
@@ -8514,7 +8518,7 @@ def delete_teacher_assessment_question(qid):
 @admin_bp.route('/teacher-assessment/periods')
 @login_required
 def assessment_periods():
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     periods = TeacherAssessmentPeriod.query.order_by(
@@ -8536,7 +8540,7 @@ def assessment_periods():
 @admin_bp.route('/teacher-assessment/periods/add', methods=['GET', 'POST'])
 @login_required
 def add_assessment_period():
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     if request.method == 'POST':
@@ -8574,7 +8578,7 @@ def add_assessment_period():
 @admin_bp.route('/teacher-assessment/periods/<int:pid>/results')
 @login_required
 def assessment_period_results(pid):
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
     
     period = TeacherAssessmentPeriod.query.get_or_404(pid)
@@ -8651,7 +8655,7 @@ def assessment_period_results(pid):
 @admin_bp.route('/teacher-assessment/periods/<int:pid>/toggle', methods=['POST'])
 @login_required
 def toggle_assessment_period(pid):
-    if not current_user.is_admin:
+    if not current_user_is_admin():
         abort(403)
 
     period = TeacherAssessmentPeriod.query.get_or_404(pid)
