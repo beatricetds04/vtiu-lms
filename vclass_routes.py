@@ -4,7 +4,7 @@ from flask import request
 from flask_login import login_required, current_user, login_user, logout_user
 from sqlalchemy import func, text, inspect
 from werkzeug.utils import safe_join, secure_filename
-from models import QuizAttempt, db, User, Quiz, StudentQuizSubmission, Question, StudentProfile, Assignment, CourseMaterial, StudentCourseRegistration, Course,  TimetableEntry, AcademicCalendar, AcademicYear, AppointmentSlot, AppointmentBooking, StudentFeeBalance, ProgrammeFeeStructure, StudentFeeTransaction, Exam, ExamSubmission, ExamQuestion, ExamAttempt, ExamSet, ExamSetQuestion, Meeting, StudentAnswer, Recording, PasswordResetRequest, PasswordResetToken, AssignmentSubmission, Conversation, ConversationParticipant
+from models import QuizAttempt, db, User, Quiz, StudentQuizSubmission, Question, StudentProfile, Assignment, CourseMaterial, StudentCourseRegistration, Course,  TimetableEntry, AcademicCalendar, AcademicYear, AppointmentSlot, AppointmentBooking, StudentFeeBalance, ProgrammeFeeStructure, StudentFeeTransaction, Exam, ExamSubmission, ExamQuestion, ExamAttempt, ExamSet, ExamSetQuestion, Meeting, StudentAnswer, Recording, PasswordResetRequest, PasswordResetToken, AssignmentSubmission, Conversation, ConversationParticipant, MobileAuthToken
 from datetime import date, datetime, timedelta, time
 from forms import StudentLoginForm, ForgotPasswordForm, ResetPasswordForm
 from io import BytesIO
@@ -17,14 +17,67 @@ from utils.email import send_password_reset_email
 from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
 from utils.agora import build_rtc_token
+from utils.livekit import build_livekit_token
 
 vclass_bp = Blueprint('vclass', __name__, url_prefix='/vclass')
+
+
+def manual_room_code(meeting_id):
+    """Return the fixed eight-character room code shared with students."""
+    value = int(meeting_id)
+    return f'VTIU{value:04X}'[-8:]
+
+
+def meeting_id_from_room_code(room_code):
+    """Decode a fixed eight-character VTIU room code."""
+    normalized = (room_code or '').strip().upper()
+    if len(normalized) != 8 or not normalized.startswith('VTIU'):
+        return None
+    digits = normalized[4:]
+    if any(character not in '0123456789ABCDEF' for character in digits):
+        return None
+    try:
+        value = int(digits, 16)
+    except ValueError:
+        return None
+    return value or None
+
+
+def resolve_meeting_from_room_code(room_code):
+    """Resolve a meeting from either the teacher-supplied LiveKit room code or legacy VTIU IDs."""
+    normalized = (room_code or '').strip().upper()
+    if not normalized:
+        return None
+
+    meeting = Meeting.query.filter_by(meeting_code=normalized).first()
+    if meeting:
+        return meeting
+
+    legacy_meeting_id = meeting_id_from_room_code(normalized)
+    if legacy_meeting_id:
+        return Meeting.query.get(legacy_meeting_id)
+
+    return None
 
 ALLOWED_EXTENSIONS = {'.doc', '.docx', '.xls', '.xlsx', '.pdf', '.ppt', '.txt'}
 UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads", "assignments")
 
 def allowed_file(filename):
     return os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def normalize_livekit_url(raw_url):
+    """Normalize LiveKit URL for browser WebSocket connections."""
+    if not raw_url:
+        return raw_url
+    url = raw_url.strip().rstrip('/')
+    if url.startswith('https://'):
+        return 'wss://' + url[len('https://'):]
+    if url.startswith('http://'):
+        return 'ws://' + url[len('http://'):]
+    if url.startswith('wss://') or url.startswith('ws://'):
+        return url
+    return f'wss://{url}'
 
 
 def ensure_meeting_class_conversation(meeting):
@@ -1152,7 +1205,7 @@ def join_meeting_by_code():
     if not room_code:
         return render_template('vclass/join_by_code.html')
 
-    meeting = Meeting.query.filter_by(meeting_code=room_code).first()
+    meeting = resolve_meeting_from_room_code(room_code)
     if not meeting:
         flash('That room code is not valid. Ask the teacher to share it again.', 'danger')
         return render_template('vclass/join_by_code.html', room_code=room_code), 404
@@ -1182,7 +1235,7 @@ def api_join_meeting_by_code():
         return jsonify({'error': 'Only students can use this endpoint.'}), 403
 
     room_code = (request.args.get('room_code') or '').strip().upper()
-    meeting = Meeting.query.filter_by(meeting_code=room_code).first() if room_code else None
+    meeting = resolve_meeting_from_room_code(room_code)
     if not meeting:
         return jsonify({'error': 'Invalid room code.'}), 404
 
@@ -1224,10 +1277,74 @@ def api_join_meeting_by_code():
     })
 
 
-@vclass_bp.route('/meeting/<int:meeting_id>')
+@vclass_bp.route('/api/agora/token', methods=['POST'])
 @login_required
+def create_agora_token():
+    """Return an authenticated Agora token for a meeting participant."""
+    payload = request.get_json(silent=True) or {}
+    meeting_id = payload.get('meetingId')
+    if not meeting_id:
+        return jsonify({'error': 'meetingId is required.'}), 400
+
+    try:
+        meeting = Meeting.query.get(int(meeting_id))
+    except (TypeError, ValueError):
+        meeting = None
+    if not meeting:
+        return jsonify({'error': 'Meeting not found.'}), 404
+
+    if current_user.role == 'teacher':
+        if meeting.host_id != current_user.id:
+            return jsonify({'error': 'You are not the host of this meeting.'}), 403
+        role = 'host'
+    elif current_user.role == 'student':
+        registered = StudentCourseRegistration.query.filter_by(
+            student_id=current_user.id,
+            course_id=meeting.course_id,
+        ).first()
+        if not registered:
+            return jsonify({'error': 'You are not registered for this class.'}), 403
+        role = 'audience'
+    else:
+        return jsonify({'error': 'Unsupported user role.'}), 403
+
+    try:
+        token = build_rtc_token(
+            current_app.config.get('AGORA_APP_ID'),
+            current_app.config.get('AGORA_APP_CERTIFICATE'),
+            meeting.meeting_code,
+            current_user.id,
+            role,
+            expires_in=3600,
+        )
+    except RuntimeError as exc:
+        current_app.logger.error('Agora token API error: %s', exc)
+        return jsonify({'error': 'Live class service is unavailable.'}), 503
+
+    return jsonify({
+        'appId': current_app.config.get('AGORA_APP_ID'),
+        'channelName': meeting.meeting_code,
+        'uid': current_user.id,
+        'token': token,
+        'role': 'publisher' if role == 'host' else 'audience',
+        'expiresIn': 3600,
+        'meetingId': meeting.id,
+    })
+
+
+@vclass_bp.route('/meeting/<int:meeting_id>')
 def join_meeting(meeting_id):
-    """Render an Agora room only for its teacher or registered students."""
+    """Render the LiveKit classroom HTML and feed it the LiveKit room token contract."""
+    # --- Mobile Auto-Login Bypass ---
+    mobile_uid = request.args.get('m_uid')
+    if mobile_uid and not current_user.is_authenticated:
+        user = User.query.filter_by(user_id=mobile_uid).first()
+        if user:
+            login_user(user)
+            
+    if not current_user.is_authenticated:
+        return redirect(url_for('vclass.vclass_login', next=request.url))
+
     meeting = Meeting.query.get_or_404(meeting_id)
 
     if current_user.role == 'teacher':
@@ -1246,16 +1363,16 @@ def join_meeting(meeting_id):
         abort(403)
 
     try:
-        token = build_rtc_token(
-            current_app.config.get('AGORA_APP_ID'),
-            current_app.config.get('AGORA_APP_CERTIFICATE'),
+        token = build_livekit_token(
+            current_app.config.get('LIVEKIT_API_KEY'),
+            current_app.config.get('LIVEKIT_API_SECRET'),
             meeting.meeting_code,
-            current_user.id,
-            role,
-            expires_in=3600,
+            str(current_user.id),
+            current_user.full_name,
+            'publisher' if role == 'host' else 'audience',
         )
     except RuntimeError as exc:
-        current_app.logger.error('Agora configuration error: %s', exc)
+        current_app.logger.error('LiveKit configuration error: %s', exc)
         flash(f'Live class service is unavailable: {exc}', 'danger')
         return redirect(
             url_for('teacher.meetings' if role == 'host' else 'vclass.student_meetings')
@@ -1263,18 +1380,36 @@ def join_meeting(meeting_id):
 
     class_conv = ensure_meeting_class_conversation(meeting)
 
+    # Notify students that class is starting if the teacher is joining
+    if role == 'host':
+        try:
+            from utils.notification_engine import notify_live_class_started
+            notify_live_class_started(meeting, send_email=True)
+        except Exception as exc:
+            current_app.logger.warning(f"Failed to send live class start notification: {exc}")
+
+    livekit_role = 'publisher' if role == 'host' else 'audience'
+    livekit_url = normalize_livekit_url(current_app.config.get('LIVEKIT_URL'))
+    if not livekit_url:
+        current_app.logger.error(
+            'LiveKit room cannot start: LIVEKIT_URL is missing for meeting %s',
+            meeting.id,
+        )
+        flash('Live class service is unavailable: LIVEKIT_URL is not configured.', 'danger')
+        return redirect(
+            url_for('teacher.meetings' if role == 'host' else 'vclass.student_meetings')
+        )
+
     return render_template(
-        'vclass/agora_room.html',
+        'vclass/livekit_room.html',
         meeting=meeting,
         class_conversation_id=class_conv.id,
         class_conversation_name=class_conv.get_meta().get('name') or meeting.title,
         current_user_public_id=current_user.public_id,
-        agora_app_id=current_app.config.get('AGORA_APP_ID'),
-        agora_channel=meeting.meeting_code,
-        agora_token=token,
-        agora_uid=current_user.id,
-        agora_role=role,
-        agora_channel_profile=current_app.config.get('AGORA_CHANNEL_PROFILE', 'live'),
+        livekit_url=livekit_url,
+        livekit_token=token,
+        livekit_role=livekit_role,
+        current_user=current_user,
     )
 
 @vclass_bp.route('/book-appointment', methods=['GET', 'POST'])
@@ -1486,3 +1621,25 @@ def calculator():
     if getattr(current_user, "role", None) != "student":
         abort(403)
     return render_template('vclass/calculator.html')
+
+
+# --- MOBILE WEB BRIDGE ---
+
+@vclass_bp.route('/api/auth-token', methods=['POST'])
+@login_required
+def generate_web_bridge_token():
+    """Generate a short-lived token for the mobile app to bridge into the WebView."""
+    token = MobileAuthToken.generate(current_user)
+    return jsonify({'token': token})
+
+
+@vclass_bp.route('/bridge/<token>/meeting/<int:meeting_id>')
+def web_bridge_meeting(token, meeting_id):
+    """Log the user in using a bridge token and redirect to the meeting room."""
+    user = MobileAuthToken.verify_and_consume(token)
+    if not user:
+        flash("Invalid or expired session. Please try again from the app.", "danger")
+        return redirect(url_for('select_portal'))
+
+    login_user(user)
+    return redirect(url_for('vclass.join_meeting', meeting_id=meeting_id, embedded='true'))
