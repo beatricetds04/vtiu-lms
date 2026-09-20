@@ -17,7 +17,7 @@ from utils.email import send_password_reset_email
 from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
 from utils.agora import build_rtc_token
-from utils.livekit import build_livekit_token
+from utils.livekit_auth import build_livekit_token
 
 vclass_bp = Blueprint('vclass', __name__, url_prefix='/vclass')
 
