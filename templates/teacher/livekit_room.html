@@ -34,8 +34,9 @@
           <h6>Class controls</h6>
           <label for="camera-source" class="form-label small text-muted mt-2 mb-1">Camera source</label>
           <select id="camera-source" class="form-select form-select-sm mb-2" aria-label="Choose camera source" disabled>
-            <option value="">Detecting cameras...</option>
+            <option value="">Requesting camera access...</option>
           </select>
+          <button id="retry-camera" type="button" class="btn btn-outline-secondary btn-sm w-100 mb-2 d-none">Retry camera access</button>
           <button id="toggle-mic" type="button" class="btn btn-success w-100 mb-2" disabled>Mute microphone</button>
           <button id="toggle-camera" type="button" class="btn btn-success w-100 mb-2" disabled>Turn camera off</button>
           <button id="start-live" type="button" class="btn btn-danger w-100 mb-2" disabled>
@@ -111,6 +112,8 @@
   let isCameraOff = false;
   let isSharingScreen = false;
   let startNotificationSent = false;
+  let roomConnected = false;
+  let cameraReady = false;
 
   function showError(message) {
     errorBox.textContent = message;
@@ -173,6 +176,10 @@
   });
 
   function refreshCameraDevices(selectedId) {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return Promise.reject(new Error('Camera device detection is unavailable in this browser.'));
+    }
+
     return navigator.mediaDevices.enumerateDevices().then(devices => {
       const cameras = devices.filter(device => device.kind === 'videoinput');
       cameraSource.replaceChildren();
@@ -183,19 +190,24 @@
         cameraSource.appendChild(option);
       });
       if (!cameras.length) {
-        cameraSource.add(new Option('No camera found', ''));
+        cameraSource.add(new Option('No cameras found', ''));
         cameraSource.disabled = true;
-        return;
+        return false;
       }
       const savedId = selectedId || localStorage.getItem('vtiu-camera-device-id');
       cameraSource.value = cameras.some(device => device.deviceId === savedId)
         ? savedId
         : cameras[0].deviceId;
       cameraSource.disabled = false;
+      return true;
     });
   }
 
   async function prepareCamera(deviceId) {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Camera access is unavailable. Open this page in a supported browser over HTTPS.');
+    }
+
     const constraints = {
       audio: true,
       video: deviceId ? { deviceId: { exact: deviceId } } : true
@@ -206,18 +218,45 @@
     previewStream.getAudioTracks().forEach(track => { track.enabled = !isMicMuted; });
     previewStream.getVideoTracks().forEach(track => { track.enabled = !isCameraOff; });
     localPreview.srcObject = previewStream;
-    await refreshCameraDevices(deviceId);
-    startLiveButton.disabled = false;
+    const activeVideoTrack = previewStream.getVideoTracks()[0];
+    if (!activeVideoTrack) {
+      throw new Error('The selected device did not provide a camera track.');
+    }
+    cameraReady = true;
+    startLiveButton.disabled = !roomConnected;
     document.getElementById('toggle-mic').disabled = false;
     document.getElementById('toggle-camera').disabled = false;
-    statusLabel.textContent = 'Camera preview ready';
-    broadcastStatus.textContent = 'Camera ready. Start the live class when you are ready.';
+    document.getElementById('retry-camera').classList.add('d-none');
+    statusLabel.textContent = roomConnected
+      ? 'Camera preview ready'
+      : 'Camera ready. Waiting for the classroom connection.';
+    broadcastStatus.textContent = roomConnected
+      ? 'Camera ready. Start the live class when you are ready.'
+      : 'Camera ready. Waiting for the classroom connection.';
+
+    try {
+      const activeCameraId = activeVideoTrack.getSettings().deviceId;
+      const devicesFound = await refreshCameraDevices(deviceId || activeCameraId);
+      if (!devicesFound) {
+        cameraSource.replaceChildren(new Option(activeVideoTrack.label || 'Current camera', activeCameraId || ''));
+        cameraSource.disabled = true;
+        broadcastStatus.textContent = 'Camera preview is ready, but no selectable camera devices were reported.';
+      }
+    } catch (error) {
+      console.error('Unable to enumerate camera devices', error);
+      cameraSource.replaceChildren(new Option(activeVideoTrack.label || 'Current camera', activeVideoTrack.getSettings().deviceId || ''));
+      cameraSource.disabled = true;
+      broadcastStatus.textContent = 'Camera preview is ready, but the camera list could not be loaded.';
+    }
   }
 
   async function connectRoom() {
     try {
       await room.connect(livekitUrl, livekitToken);
-      statusLabel.textContent = 'Connected. Camera preview is ready.';
+      roomConnected = true;
+      statusLabel.textContent = cameraReady
+        ? 'Connected. Camera preview is ready.'
+        : 'Connected. Preparing camera...';
       statusLabel.className = 'small text-success';
       updateParticipantCount();
       room.remoteParticipants.forEach(participant => {
@@ -225,14 +264,39 @@
           if (publication.track) attachTrack(publication.track, participant);
         });
       });
-      await prepareCamera();
+      startLiveButton.disabled = !cameraReady;
     } catch (error) {
       console.error('Unable to connect to the live classroom', error);
-      statusLabel.textContent = 'Connection failed';
-      showError('Could not connect to the live classroom or access your camera. Check permissions and refresh to try again.');
-      broadcastStatus.textContent = 'Classroom connection or camera setup failed.';
+      statusLabel.textContent = 'Classroom connection failed';
+      statusLabel.className = 'small text-danger';
+      showError('Could not connect to the live classroom. Your camera preview can still be prepared, but starting the class requires a connection.');
+      broadcastStatus.textContent = cameraReady
+        ? 'Camera ready. Waiting for the classroom connection.'
+        : 'Waiting for the classroom connection and camera setup.';
     }
   }
+
+  async function initializeCamera() {
+    try {
+      await prepareCamera();
+    } catch (error) {
+      console.error('Unable to initialize the teacher camera', error);
+      cameraSource.replaceChildren(new Option('Camera access unavailable', ''));
+      cameraSource.disabled = true;
+      startLiveButton.disabled = true;
+      document.getElementById('retry-camera').classList.remove('d-none');
+      statusLabel.textContent = 'Camera setup failed';
+      statusLabel.className = 'small text-danger';
+      broadcastStatus.textContent = error.name === 'NotAllowedError'
+        ? 'Allow camera and microphone access in your browser, then retry.'
+        : error.message || 'Camera setup failed.';
+      showError(error.name === 'NotAllowedError'
+        ? 'Camera or microphone access was denied. Allow access in your browser settings and retry camera access.'
+        : error.message || 'Camera setup failed. Check the device connection and browser permissions.');
+    }
+  }
+
+  document.getElementById('retry-camera').addEventListener('click', initializeCamera);
 
   cameraSource.addEventListener('change', async event => {
     if (!event.target.value) return;
@@ -246,8 +310,12 @@
       }
     } catch (error) {
       console.error('Unable to switch camera source', error);
-      showError('Unable to switch to that camera. Check browser permissions and try again.');
-      await refreshCameraDevices();
+      showError(error.message || 'Unable to switch to that camera. Check browser permissions and try again.');
+      try {
+        await refreshCameraDevices();
+      } catch (refreshError) {
+        console.error('Unable to refresh camera devices', refreshError);
+      }
     }
   });
 
@@ -450,5 +518,6 @@
   loadClassChatHistory();
 
   connectRoom();
+  initializeCamera();
 </script>
 {% endblock %}
