@@ -1380,14 +1380,6 @@ def join_meeting(meeting_id):
 
     class_conv = ensure_meeting_class_conversation(meeting)
 
-    # Notify students that class is starting if the teacher is joining
-    if role == 'host':
-        try:
-            from utils.notification_engine import notify_live_class_started
-            notify_live_class_started(meeting, send_email=True)
-        except Exception as exc:
-            current_app.logger.warning(f"Failed to send live class start notification: {exc}")
-
     livekit_role = 'publisher' if role == 'host' else 'audience'
     livekit_url = normalize_livekit_url(current_app.config.get('LIVEKIT_URL'))
     if not livekit_url:
@@ -1401,7 +1393,7 @@ def join_meeting(meeting_id):
         )
 
     return render_template(
-        'vclass/livekit_room.html',
+        'teacher/livekit_room.html' if role == 'host' else 'vclass/livekit_room.html',
         meeting=meeting,
         class_conversation_id=class_conv.id,
         class_conversation_name=class_conv.get_meta().get('name') or meeting.title,
@@ -1411,6 +1403,31 @@ def join_meeting(meeting_id):
         livekit_role=livekit_role,
         current_user=current_user,
     )
+
+
+@vclass_bp.route('/meeting/<int:meeting_id>/start', methods=['POST'])
+@login_required
+def start_live_meeting(meeting_id):
+    """Notify enrolled students only after the teacher explicitly starts broadcasting."""
+    if current_user.role != 'teacher':
+        abort(403)
+
+    meeting = Meeting.query.get_or_404(meeting_id)
+    if meeting.host_id != current_user.id:
+        abort(403)
+
+    try:
+        from utils.notification_engine import notify_live_class_started
+        notify_live_class_started(meeting, send_email=True)
+    except Exception as exc:
+        current_app.logger.warning(
+            'Failed to send live class start notification for meeting %s: %s',
+            meeting.id,
+            exc,
+        )
+        return jsonify({'error': 'The class started, but student notifications could not be sent.'}), 503
+
+    return jsonify({'success': True})
 
 @vclass_bp.route('/book-appointment', methods=['GET', 'POST'])
 @login_required
