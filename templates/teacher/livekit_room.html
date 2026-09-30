@@ -11,6 +11,7 @@
           <div class="small text-muted">{{ meeting.course.name }}</div>
           <h4 class="mb-0">{{ meeting.title }}</h4>
           <span id="connection-status" class="small text-muted">Connecting...</span>
+          <button id="retry-room" type="button" class="btn btn-outline-danger btn-sm ms-2 d-none">Retry classroom connection</button>
         </div>
         <div class="small text-muted">
           <i class="fas fa-users text-primary me-1" aria-hidden="true"></i>
@@ -34,7 +35,7 @@
           <h6>Class controls</h6>
           <label for="camera-source" class="form-label small text-muted mt-2 mb-1">Camera source</label>
           <select id="camera-source" class="form-select form-select-sm mb-2" aria-label="Choose camera source" disabled>
-            <option value="">Requesting camera access...</option>
+            <option value="">Allow camera access in your browser...</option>
           </select>
           <button id="retry-camera" type="button" class="btn btn-outline-secondary btn-sm w-100 mb-2 d-none">Retry camera access</button>
           <button id="toggle-mic" type="button" class="btn btn-success w-100 mb-2" disabled>Mute microphone</button>
@@ -113,6 +114,8 @@
   let isSharingScreen = false;
   let startNotificationSent = false;
   let roomConnected = false;
+  let roomConnecting = false;
+  let roomConnectionAttempt = 0;
   let cameraReady = false;
 
   function showError(message) {
@@ -208,11 +211,23 @@
       throw new Error('Camera access is unavailable. Open this page in a supported browser over HTTPS.');
     }
 
+    broadcastStatus.textContent = 'Allow camera and microphone access in your browser prompt.';
+    statusLabel.textContent = 'Waiting for camera and microphone permission';
+    let permissionWaitNotice = window.setTimeout(() => {
+      if (!cameraReady) {
+        showError('The browser is still waiting for camera or microphone permission. Allow access in the browser prompt, or check this site’s camera and microphone settings.');
+      }
+    }, 12000);
     const constraints = {
       audio: true,
       video: deviceId ? { deviceId: { exact: deviceId } } : true
     };
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+    } finally {
+      window.clearTimeout(permissionWaitNotice);
+    }
     if (previewStream) previewStream.getTracks().forEach(track => track.stop());
     previewStream = stream;
     previewStream.getAudioTracks().forEach(track => { track.enabled = !isMicMuted; });
@@ -251,8 +266,34 @@
   }
 
   async function connectRoom() {
+    if (roomConnected || roomConnecting) return;
+
+    roomConnecting = true;
+    const attempt = ++roomConnectionAttempt;
+    const retryButton = document.getElementById('retry-room');
+    retryButton.classList.add('d-none');
+    statusLabel.textContent = 'Connecting to the live classroom...';
+    statusLabel.className = 'small text-muted';
+    let timeoutId;
+
     try {
-      await room.connect(livekitUrl, livekitToken);
+      const connection = room.connect(livekitUrl, livekitToken);
+      connection.then(() => {
+        if (attempt !== roomConnectionAttempt) room.disconnect();
+      }).catch(() => {});
+      await Promise.race([
+        connection,
+        new Promise((resolve, reject) => {
+          timeoutId = window.setTimeout(
+            () => reject(new Error('The classroom connection timed out. Check the LiveKit URL, project API key/secret, and Railway network logs.')),
+            20000
+          );
+        })
+      ]);
+      if (attempt !== roomConnectionAttempt) {
+        await room.disconnect();
+        return;
+      }
       roomConnected = true;
       statusLabel.textContent = cameraReady
         ? 'Connected. Camera preview is ready.'
@@ -266,15 +307,25 @@
       });
       startLiveButton.disabled = !cameraReady;
     } catch (error) {
+      if (attempt !== roomConnectionAttempt) return;
       console.error('Unable to connect to the live classroom', error);
+      roomConnectionAttempt += 1;
+      roomConnecting = false;
+      await room.disconnect();
       statusLabel.textContent = 'Classroom connection failed';
       statusLabel.className = 'small text-danger';
-      showError('Could not connect to the live classroom. Your camera preview can still be prepared, but starting the class requires a connection.');
+      showError(error.message || 'Could not connect to the live classroom. Check the LiveKit URL and that the API key and secret belong to the same LiveKit project.');
+      retryButton.classList.remove('d-none');
       broadcastStatus.textContent = cameraReady
         ? 'Camera ready. Waiting for the classroom connection.'
         : 'Waiting for the classroom connection and camera setup.';
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (attempt === roomConnectionAttempt) roomConnecting = false;
     }
   }
+
+  document.getElementById('retry-room').addEventListener('click', connectRoom);
 
   async function initializeCamera() {
     try {
@@ -288,11 +339,19 @@
       statusLabel.textContent = 'Camera setup failed';
       statusLabel.className = 'small text-danger';
       broadcastStatus.textContent = error.name === 'NotAllowedError'
-        ? 'Allow camera and microphone access in your browser, then retry.'
-        : error.message || 'Camera setup failed.';
+        ? 'Camera or microphone access was denied. Allow access in browser settings, then retry.'
+        : error.name === 'NotFoundError'
+          ? 'No camera or microphone was found. Connect a device, then retry.'
+          : error.name === 'NotReadableError'
+            ? 'The camera or microphone is busy in another app. Close that app, then retry.'
+            : error.message || 'Camera setup failed.';
       showError(error.name === 'NotAllowedError'
         ? 'Camera or microphone access was denied. Allow access in your browser settings and retry camera access.'
-        : error.message || 'Camera setup failed. Check the device connection and browser permissions.');
+        : error.name === 'NotFoundError'
+          ? 'No camera or microphone was found. Connect a device and retry camera access.'
+          : error.name === 'NotReadableError'
+            ? 'The camera or microphone could not be opened. Close other apps that may be using it, then retry.'
+            : error.message || 'Camera setup failed. Check the device connection and browser permissions.');
     }
   }
 
