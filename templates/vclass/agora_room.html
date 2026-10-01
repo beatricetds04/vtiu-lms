@@ -540,8 +540,15 @@
     }
   });
 
-  client.on('user-unpublished', user => {
-    document.getElementById(`remote-${user.uid}`)?.remove();
+  client.on('user-unpublished', (user, mediaType) => {
+    if (mediaType === 'video') {
+      document.getElementById(`remote-${user.uid}`)?.remove();
+      if (!isTeacher) {
+        const videoStatus = document.getElementById('video-status');
+        videoStatus.textContent = 'Connected. Waiting for the teacher video...';
+        videoStatus.classList.remove('d-none');
+      }
+    }
     updateParticipantCount();
   });
 
