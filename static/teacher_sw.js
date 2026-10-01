@@ -25,7 +25,7 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
 
-  if (!url.pathname.startsWith("/teacher/")) return;
+  if (event.request.method !== "GET" || !url.pathname.startsWith("/teacher/")) return;
 
   event.respondWith(
     fetch(event.request)
