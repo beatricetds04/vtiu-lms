@@ -17,7 +17,6 @@ from utils.email import send_password_reset_email
 from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
 from utils.agora import build_rtc_token
-from utils.livekit_auth import build_livekit_token
 
 vclass_bp = Blueprint('vclass', __name__, url_prefix='/vclass')
 
@@ -44,7 +43,7 @@ def meeting_id_from_room_code(room_code):
 
 
 def resolve_meeting_from_room_code(room_code):
-    """Resolve a meeting from either the teacher-supplied LiveKit room code or legacy VTIU IDs."""
+    """Resolve a meeting from its room code or a legacy VTIU ID."""
     normalized = (room_code or '').strip().upper()
     if not normalized:
         return None
@@ -64,20 +63,6 @@ UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads", "assignments")
 
 def allowed_file(filename):
     return os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def normalize_livekit_url(raw_url):
-    """Normalize LiveKit URL for browser WebSocket connections."""
-    if not raw_url:
-        return raw_url
-    url = raw_url.strip().rstrip('/')
-    if url.startswith('https://'):
-        return 'wss://' + url[len('https://'):]
-    if url.startswith('http://'):
-        return 'ws://' + url[len('http://'):]
-    if url.startswith('wss://') or url.startswith('ws://'):
-        return url
-    return f'wss://{url}'
 
 
 def ensure_meeting_class_conversation(meeting):
@@ -1334,14 +1319,14 @@ def create_agora_token():
 
 @vclass_bp.route('/meeting/<int:meeting_id>')
 def join_meeting(meeting_id):
-    """Render the LiveKit classroom HTML and feed it the LiveKit room token contract."""
+    """Render the Agora classroom for its teacher or registered students."""
     # --- Mobile Auto-Login Bypass ---
     mobile_uid = request.args.get('m_uid')
     if mobile_uid and not current_user.is_authenticated:
         user = User.query.filter_by(user_id=mobile_uid).first()
         if user:
             login_user(user)
-            
+
     if not current_user.is_authenticated:
         return redirect(url_for('vclass.vclass_login', next=request.url))
 
@@ -1363,16 +1348,16 @@ def join_meeting(meeting_id):
         abort(403)
 
     try:
-        token = build_livekit_token(
-            current_app.config.get('LIVEKIT_API_KEY'),
-            current_app.config.get('LIVEKIT_API_SECRET'),
+        token = build_rtc_token(
+            current_app.config.get('AGORA_APP_ID'),
+            current_app.config.get('AGORA_APP_CERTIFICATE'),
             meeting.meeting_code,
-            str(current_user.id),
-            current_user.full_name,
-            'publisher' if role == 'host' else 'audience',
+            current_user.id,
+            role,
+            expires_in=3600,
         )
     except RuntimeError as exc:
-        current_app.logger.error('LiveKit configuration error: %s', exc)
+        current_app.logger.error('Agora configuration error: %s', exc)
         flash(f'Live class service is unavailable: {exc}', 'danger')
         return redirect(
             url_for('teacher.meetings' if role == 'host' else 'vclass.student_meetings')
@@ -1380,28 +1365,18 @@ def join_meeting(meeting_id):
 
     class_conv = ensure_meeting_class_conversation(meeting)
 
-    livekit_role = 'publisher' if role == 'host' else 'audience'
-    livekit_url = normalize_livekit_url(current_app.config.get('LIVEKIT_URL'))
-    if not livekit_url:
-        current_app.logger.error(
-            'LiveKit room cannot start: LIVEKIT_URL is missing for meeting %s',
-            meeting.id,
-        )
-        flash('Live class service is unavailable: LIVEKIT_URL is not configured.', 'danger')
-        return redirect(
-            url_for('teacher.meetings' if role == 'host' else 'vclass.student_meetings')
-        )
-
     return render_template(
-        'teacher/livekit_room.html' if role == 'host' else 'vclass/livekit_room.html',
+        'vclass/agora_room.html',
         meeting=meeting,
         class_conversation_id=class_conv.id,
         class_conversation_name=class_conv.get_meta().get('name') or meeting.title,
         current_user_public_id=current_user.public_id,
-        livekit_url=livekit_url,
-        livekit_token=token,
-        livekit_role=livekit_role,
-        current_user=current_user,
+        agora_app_id=current_app.config.get('AGORA_APP_ID'),
+        agora_channel=meeting.meeting_code,
+        agora_token=token,
+        agora_uid=current_user.id,
+        agora_role=role,
+        agora_channel_profile=current_app.config.get('AGORA_CHANNEL_PROFILE', 'live'),
     )
 
 
