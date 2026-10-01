@@ -252,12 +252,23 @@
     fullscreenButton.innerHTML = `<i class="fas fa-${isFullscreen ? 'compress' : 'expand'}" aria-hidden="true"></i>`;
   }
 
+  async function lockMobileLandscape() {
+    if (!window.matchMedia('(pointer: coarse)').matches || !screen.orientation?.lock) return;
+
+    try {
+      await screen.orientation.lock('landscape');
+    } catch (error) {
+      console.warn('Mobile browser did not allow landscape orientation lock', error);
+    }
+  }
+
   fullscreenButton.addEventListener('click', async () => {
     try {
       if (document.fullscreenElement === videoStage) {
         await document.exitFullscreen();
       } else if (videoStage.requestFullscreen) {
         await videoStage.requestFullscreen();
+        await lockMobileLandscape();
       } else {
         showError('Fullscreen is not supported by this browser.');
       }
@@ -266,7 +277,12 @@
       showError('Unable to enter fullscreen. Check your browser permissions and try again.');
     }
   });
-  document.addEventListener('fullscreenchange', updateFullscreenButton);
+  document.addEventListener('fullscreenchange', () => {
+    updateFullscreenButton();
+    if (document.fullscreenElement !== videoStage) {
+      screen.orientation?.unlock?.();
+    }
+  });
 
   function appendClassChatMessage(message) {
     const item = document.createElement('div');
