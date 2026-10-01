@@ -3,7 +3,7 @@ import json
 import re
 import tempfile
 from zipfile import ZipFile
-from flask import Blueprint, render_template, abort, flash, redirect, url_for, request, jsonify, current_app
+from flask import Blueprint, render_template, abort, flash, redirect, url_for, request, jsonify, current_app, send_from_directory
 from flask_login import login_required, current_user, login_user
 import requests
 from wtforms import SelectField
@@ -15,7 +15,7 @@ from sqlalchemy import and_, desc, func, asc
 from sqlalchemy.orm import joinedload
 from collections import defaultdict
 from utils.notifications import create_assignment_notification
-from utils.notification_engine import notify_quiz_created, notify_assignment_created, notify_assignment_graded
+from utils.notification_engine import notify_quiz_created, notify_assignment_created, notify_assignment_graded, notify_live_class_scheduled
 import os, uuid
 from utils.helpers import get_programme_choices, get_level_choices, get_course_choices
 from utils.academic_year import configured_academic_year
@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_FOLDER = 'static/uploads/quizzes'
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc', 'txt'}
+
+
+@teacher_bp.route('/teacher_sw.js')
+def teacher_service_worker():
+    return send_from_directory(current_app.static_folder, 'teacher_sw.js')
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -2129,24 +2135,36 @@ def add_meeting():
     form.course_id.choices = [(a.course.id, a.course.name) for a in profile.assignments]
 
     if form.validate_on_submit():
+        room_code = (form.room_code.data or '').strip().upper()
+        if Meeting.query.filter_by(meeting_code=room_code).first():
+            form.room_code.errors.append('This room code is already in use. Please choose another one.')
+            return render_template('teacher/meeting_form.html', form=form)
+
         try:
             meeting = Meeting(
                 title=form.title.data,
                 description=form.description.data,
                 host_id=current_user.id,
                 course_id=form.course_id.data,
-                meeting_code=f'meeting-{uuid.uuid4().hex}',
+                meeting_code=room_code,
                 scheduled_start=form.scheduled_start.data,
                 scheduled_end=form.scheduled_end.data,
             )
             db.session.add(meeting)
             db.session.commit()
+            
+            # Notify students about scheduled class
+            try:
+                notify_live_class_scheduled(meeting, send_email=True)
+            except Exception as e:
+                current_app.logger.warning(f"Failed to send class schedule notification: {e}")
+
         except Exception as exc:
             db.session.rollback()
-            current_app.logger.exception('Failed to create Agora classroom: %s', exc)
+            current_app.logger.exception('Failed to create live classroom: %s', exc)
             flash('Could not create the live class. Please try again.', 'danger')
             return render_template('teacher/meeting_form.html', form=form)
-        flash("Agora live class created successfully!", "success")
+        flash("Live class created successfully!", "success")
         return redirect(url_for("teacher.meetings"))
 
     return render_template("teacher/meeting_form.html", form=form)
@@ -2168,15 +2186,23 @@ def edit_meeting(meeting_id):
         return redirect(url_for('teacher.dashboard'))
 
     form = MeetingForm(obj=meeting)
+    form.room_code.data = meeting.meeting_code
     form.course_id.choices = [(a.course.id, a.course.name) for a in profile.assignments]
 
     if form.validate_on_submit():
         if form.scheduled_end.data <= form.scheduled_start.data:
             form.scheduled_end.errors.append('End time must be after the start time.')
         else:
+            room_code = (form.room_code.data or '').strip().upper()
+            existing = Meeting.query.filter(Meeting.meeting_code == room_code, Meeting.id != meeting.id).first()
+            if existing:
+                form.room_code.errors.append('This room code is already in use. Please choose another one.')
+                return render_template('teacher/meeting_form.html', form=form, meeting=meeting)
+
             meeting.title = form.title.data
             meeting.description = form.description.data
             meeting.course_id = form.course_id.data
+            meeting.meeting_code = room_code
             meeting.scheduled_start = form.scheduled_start.data
             meeting.scheduled_end = form.scheduled_end.data
             db.session.commit()
