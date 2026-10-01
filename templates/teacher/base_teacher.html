@@ -5,6 +5,7 @@
   <title>{% block title %}Teacher Panel{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content="{{ csrf_token() }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <!-- PWA (Teacher) -->
   <link rel="manifest" href="{{ url_for('static', filename='teacher_manifest.json') }}">
   <meta name="theme-color" content="#5b21b6">
@@ -663,7 +664,7 @@ body.dark-mode .btn-ghost {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(
-      "{{ url_for('static', filename='teacher_sw.js') }}",
+      "{{ url_for('teacher.teacher_service_worker') }}",
       { scope: "/teacher/" }
     ).then(reg => {
       console.log("Teacher SW registered:", reg.scope);
