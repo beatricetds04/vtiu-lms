@@ -62,7 +62,7 @@ NOTIFICATION_TYPES = {
     'announcement': {'label': 'Announcement', 'icon': 'bullhorn', 'color': '#0d6efd'},
     'event_reminder': {'label': 'Event Reminder', 'icon': 'calendar-alt', 'color': '#ffc107'},
     
-    # Live Class Events (LiveKit)
+    # Live Class Events
     'live_class_scheduled': {'label': 'Live Class Scheduled', 'icon': 'calendar-plus', 'color': '#0d6efd'},
     'live_class_started': {'label': 'Live Class Started', 'icon': 'video', 'color': '#dc3545'},
     'live_class_ended': {'label': 'Live Class Ended', 'icon': 'video-slash', 'color': '#6c757d'},
@@ -468,7 +468,7 @@ Make sure you're prepared and have reviewed all course materials.
     )
 
 # =============================================================================
-# LIVE CLASS NOTIFICATIONS (LIVEKIT)
+# LIVE CLASS NOTIFICATIONS
 # =============================================================================
 
 def notify_live_class_scheduled(meeting, send_email=True):
