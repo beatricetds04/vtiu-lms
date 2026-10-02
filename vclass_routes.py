@@ -229,7 +229,7 @@ def reset_password(token):
             prt.request.completed_at = datetime.utcnow()
         db.session.commit()
         flash('Password updated. Please log in.', 'success')
-        return redirect(url_for('login'))
+        return redirect(url_for('vclass.vclass_login'))
 
     return render_template('reset_password.html', form=form)
 
