@@ -12,7 +12,6 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#4A90E2">
 
   <!-- Custom Theme -->
@@ -218,20 +217,6 @@
         }
       });
     });
-  </script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register("/static/sw.js").then(
-          function(registration) {
-        console.log("ServiceWorker registration successful with scope: ", registration.scope);
-          },
-          function(err) {
-            console.log("ServiceWorker registration failed: ", err);
-          }
-        );
-      });
-    }
   </script>
 </body>
 </html>
