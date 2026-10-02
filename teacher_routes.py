@@ -33,11 +33,6 @@ UPLOAD_FOLDER = 'static/uploads/quizzes'
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc', 'txt'}
 
 
-@teacher_bp.route('/teacher_sw.js')
-def teacher_service_worker():
-    return send_from_directory(current_app.static_folder, 'teacher_sw.js')
-
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
