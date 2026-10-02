@@ -5,7 +5,27 @@ class Config:
         # ------------------------------------------------------
         # CORE
         # ------------------------------------------------------
-        SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
+        # Require a real secret in production so CSRF/session tokens remain valid
+        # across deploys and app restarts. Local development may still fall back to
+        # a generated ephemeral secret to avoid blocking startup in non-prod.
+        def _production_environment():
+            return bool(
+                os.environ.get("IS_PRODUCTION") in ("1", "true", "True")
+                or os.environ.get("FLASK_ENV", "").lower() == "production"
+                or os.environ.get("RAILWAY_ENVIRONMENT")
+                or os.environ.get("RAILWAY_ENVIRONMENT_NAME")
+                or os.environ.get("RAILWAY_PROJECT_ID")
+                or os.environ.get("RAILWAY_SERVICE_ID")
+            )
+
+        SECRET_KEY = os.environ.get("SECRET_KEY")
+        if not SECRET_KEY:
+            if _production_environment():
+                raise RuntimeError(
+                    "SECRET_KEY is required in production. Set it in Railway/your environment "
+                    "before starting the app."
+                )
+            SECRET_KEY = "dev-secret-key"
 
         # Paystack credentials are supplied through deployment environment variables.
         PAYSTACK_TEST_SECRET_KEY = os.environ.get("PAYSTACK_TEST_SECRET_KEY", "")
@@ -111,9 +131,6 @@ class Config:
         AGORA_APP_ID = os.environ.get("AGORA_APP_ID", "").strip()
         AGORA_APP_CERTIFICATE = os.environ.get("AGORA_APP_CERTIFICATE", "").strip()
         AGORA_CHANNEL_PROFILE = os.environ.get("AGORA_CHANNEL_PROFILE", "live").strip().lower()
-        LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "wss://vtiu-lzw41bcs.livekit.cloud").strip()
-        LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "APIXaWigpquJmis").strip()
-        LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "").strip()
         REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 
         # Legacy Zoom configuration is intentionally inactive. Keep these values
