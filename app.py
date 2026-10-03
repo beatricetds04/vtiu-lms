@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime
-from flask import Flask, render_template, redirect, url_for, flash, request, abort, jsonify, send_from_directory, current_app, g
+from flask import Flask, render_template, redirect, url_for, flash, request, abort, jsonify, send_from_directory, current_app, g, session
 from werkzeug.utils import secure_filename
 import time
 import signal
@@ -669,14 +669,15 @@ def load_user(user_id):
 # ===== CSRF Protection =====
 @app.before_request
 def make_csrf_token_available():
-    """Make CSRF token available in all templates"""
-    generate_csrf()
+    """Ensure each session owns a valid CSRF token without rotating it on every request."""
+    if not session.get('csrf_token'):
+        session['csrf_token'] = generate_csrf()
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
-    """Handle CSRF errors gracefully"""
+    """Handle CSRF errors gracefully."""
     flash('Security token expired. Please try again.', 'error')
-    return redirect(url_for('home'))
+    return redirect(request.referrer or url_for('home'))
 
 # ===== Template Filters =====
 def _start_year_filter(value):
