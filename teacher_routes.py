@@ -2126,6 +2126,10 @@ def add_meeting():
         abort(403)
 
     profile = TeacherProfile.query.filter_by(user_id=current_user.user_id).first()
+    if not profile:
+        flash("Please complete your profile first.", "warning")
+        return redirect(url_for('teacher.dashboard'))
+
     form = MeetingForm()
     form.course_id.choices = [(a.course.id, a.course.name) for a in profile.assignments]
 
