@@ -1,21 +1,36 @@
-{% extends "vclass/base_vclass.html" %}
+{% extends 'vclass/base_vclass.html' %}
+
 {% block title %}Join Live Class{% endblock %}
 
 {% block content %}
-<div class="container py-5">
+<div class="container py-4">
   <div class="row justify-content-center">
     <div class="col-md-7 col-lg-5">
-      <div class="card border-0 shadow-sm">
-        <div class="card-body p-4">
-          <h4 class="mb-2">Join live class</h4>
-          <p class="text-muted mb-4">Enter the room code shared by your teacher.</p>
-          <form method="post">
+      <div class="card shadow-sm">
+        <div class="card-header text-white" style="background-color: #034d34;">
+          <h4 class="mb-0">Join a Live Class</h4>
+        </div>
+        <div class="card-body">
+          <p class="text-muted">Enter the room code shared by your teacher.</p>
+          <form method="POST">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <label for="room-code" class="form-label">Room code</label>
-            <input id="room-code" name="room_code" class="form-control form-control-lg mb-3" value="{{ room_code or '' }}" placeholder="VTIU0001" minlength="8" maxlength="8" pattern="[Vv][Tt][Ii][Uu][0-9A-Fa-f]{4}" autocomplete="off" required autofocus>
-            <button type="submit" class="btn btn-primary w-100">Find class</button>
+            <div class="mb-3">
+              <label for="room_code" class="form-label fw-bold">Room code</label>
+              <input
+                id="room_code"
+                name="room_code"
+                type="text"
+                class="form-control text-uppercase"
+                value="{{ room_code or '' }}"
+                maxlength="80"
+                autocomplete="off"
+                autocapitalize="characters"
+                required
+                autofocus
+              >
+            </div>
+            <button type="submit" class="btn btn-success w-100">Find and Join Class</button>
           </form>
-          <a href="{{ url_for('vclass.student_meetings') }}" class="btn btn-link w-100 mt-2">Back to live classes</a>
         </div>
       </div>
     </div>
