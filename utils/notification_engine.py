@@ -487,8 +487,9 @@ A new live class has been scheduled!
 Course: {meeting.course.name}
 Topic: {meeting.title}
 Date & Time: {start_str}
+Room code: {meeting.meeting_code}
 
-Please mark your calendar and join using the VTIU app or student portal.
+Enter the room code in the Live Classes area of the student portal to join.
     """
     
     return create_notification(
