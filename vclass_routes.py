@@ -1209,6 +1209,7 @@ def join_meeting_by_code():
         flash('This live class is not currently open.', 'warning')
         return redirect(url_for('vclass.student_meetings'))
 
+    session['verified_meeting_id'] = meeting.id
     return redirect(url_for('vclass.join_meeting', meeting_id=meeting.id))
 
 
@@ -1337,6 +1338,10 @@ def join_meeting(meeting_id):
             abort(403)
         role = 'host'
     elif current_user.role == 'student':
+        if session.pop('verified_meeting_id', None) != meeting.id:
+            flash('Enter the room code shared by your teacher before joining.', 'info')
+            return redirect(url_for('vclass.join_meeting_by_code'))
+
         registered_course_ids = {
             registration.course_id
             for registration in current_user.registered_courses
