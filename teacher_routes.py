@@ -17,6 +17,8 @@ from collections import defaultdict
 from utils.notifications import create_assignment_notification
 from utils.notification_engine import notify_quiz_created, notify_assignment_created, notify_assignment_graded, notify_live_class_scheduled
 import os, uuid
+import secrets
+import string
 from utils.helpers import get_programme_choices, get_level_choices, get_course_choices
 from utils.academic_year import configured_academic_year
 from wtforms.validators import DataRequired 
@@ -35,6 +37,16 @@ ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc', 'txt'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def generate_meeting_room_code():
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(5):
+        room_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        if not Meeting.query.filter_by(meeting_code=room_code).first():
+            return room_code
+    raise RuntimeError('Could not generate a unique meeting room code.')
+
 
 @teacher_bp.route('/login', methods=['GET', 'POST'])
 def teacher_login():
@@ -2134,12 +2146,8 @@ def add_meeting():
     form.course_id.choices = [(a.course.id, a.course.name) for a in profile.assignments]
 
     if form.validate_on_submit():
-        room_code = (form.room_code.data or '').strip().upper()
-        if Meeting.query.filter_by(meeting_code=room_code).first():
-            form.room_code.errors.append('This room code is already in use. Please choose another one.')
-            return render_template('teacher/meeting_form.html', form=form)
-
         try:
+            room_code = generate_meeting_room_code()
             meeting = Meeting(
                 title=form.title.data,
                 description=form.description.data,
@@ -2185,23 +2193,15 @@ def edit_meeting(meeting_id):
         return redirect(url_for('teacher.dashboard'))
 
     form = MeetingForm(obj=meeting)
-    form.room_code.data = meeting.meeting_code
     form.course_id.choices = [(a.course.id, a.course.name) for a in profile.assignments]
 
     if form.validate_on_submit():
         if form.scheduled_end.data <= form.scheduled_start.data:
             form.scheduled_end.errors.append('End time must be after the start time.')
         else:
-            room_code = (form.room_code.data or '').strip().upper()
-            existing = Meeting.query.filter(Meeting.meeting_code == room_code, Meeting.id != meeting.id).first()
-            if existing:
-                form.room_code.errors.append('This room code is already in use. Please choose another one.')
-                return render_template('teacher/meeting_form.html', form=form, meeting=meeting)
-
             meeting.title = form.title.data
             meeting.description = form.description.data
             meeting.course_id = form.course_id.data
-            meeting.meeting_code = room_code
             meeting.scheduled_start = form.scheduled_start.data
             meeting.scheduled_end = form.scheduled_end.data
             db.session.commit()
